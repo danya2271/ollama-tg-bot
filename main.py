@@ -13,7 +13,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(f"Hello! I am a bot powered by the {OLLAMA_MODEL} model. How can I help you today?")
 
 async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Sends a '/bye' command to Ollama to reset the conversation context."""
+    """Sends a '/clear' command to Ollama to reset the conversation context."""
     user_id = update.effective_user.id
     if user_id not in ALLOWED_TELEGRAM_USER_IDS:
         await update.message.reply_text("Sorry, you are not authorized to use this bot.")
@@ -23,11 +23,11 @@ async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("Resetting the model session...")
 
     try:
-        # Send the /bye command to the model to formally end the conversation.
+        # Send the /clear command to the model to formally end the conversation.
         # We don't need to do anything with the response.
         ollama.chat(
             model=OLLAMA_MODEL,
-            messages=[{'role': 'user', 'content': '/bye'}]
+            messages=[{'role': 'user', 'content': '/clear'}]
         )
         await update.message.reply_text("Model session has been successfully reset. I'm ready for a new conversation!")
 
