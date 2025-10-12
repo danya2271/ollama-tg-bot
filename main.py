@@ -13,21 +13,27 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(f"Hello! I am a bot powered by the {OLLAMA_MODEL} model. How can I help you today?")
 
 async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Clears the conversation history and restarts the LLM for the user."""
+    """Sends a '/bye' command to Ollama to reset the conversation context."""
     user_id = update.effective_user.id
     if user_id not in ALLOWED_TELEGRAM_USER_IDS:
         await update.message.reply_text("Sorry, you are not authorized to use this bot.")
         return
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
-    await update.message.reply_text("Restarting the language model...")
+    await update.message.reply_text("Resetting the model session...")
 
-    # In this stateless implementation, each message is a new chat.
-    # Therefore, a "restart" is essentially just a confirmation to the user
-    # that the bot is ready for a new, context-free conversation.
-    # If you were to implement conversation history, you would clear it here.
+    try:
+        # Send the /bye command to the model to formally end the conversation.
+        # We don't need to do anything with the response.
+        ollama.chat(
+            model=OLLAMA_MODEL,
+            messages=[{'role': 'user', 'content': '/bye'}]
+        )
+        await update.message.reply_text("Model session has been successfully reset. I'm ready for a new conversation!")
 
-    await update.message.reply_text("The language model has been restarted. I'm ready for a new conversation!")
+    except Exception as e:
+        print(f"An error occurred during restart: {e}")
+        await update.message.reply_text("Sorry, I encountered an error while trying to reset the model.")
 
 
 async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -68,7 +74,7 @@ def main() -> None:
 
     # --- Register Handlers ---
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("restart", restart)) # <-- Added this line
+    app.add_handler(CommandHandler("restart", restart))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat))
 
     # --- Start the Bot ---
