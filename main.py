@@ -9,8 +9,9 @@ from config import TELEGRAM_BOT_TOKEN, OLLAMA_MODEL, ALLOWED_TELEGRAM_USER_IDS
 # --- Bot Handlers ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_name = update.effective_user.first_name
     """Sends a welcome message when the /start command is issued."""
-    await update.message.reply_text(f"Hello! I am a bot powered by the {OLLAMA_MODEL} model. How can I help you today?")
+    await update.message.reply_text(f"Hello, {user_name}! I am a bot powered by the {OLLAMA_MODEL} model. How can I help you today?")
 
 async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sends a '/clear' command to Ollama to reset the conversation context."""
@@ -45,7 +46,7 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     user_message = update.message.text
     # Print user's message to console
-    print(f"User: {user_message}")
+    print(f"User ({update.effective_user.first_name}): {user_message}")
 
     # Show a "typing..." notification to the user
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
