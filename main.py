@@ -44,6 +44,8 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     user_message = update.message.text
+    # Print user's message to console
+    print(f"User: {user_message}")
 
     # Show a "typing..." notification to the user
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
@@ -60,6 +62,8 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             ]
         )
         bot_response = response['message']['content']
+        # Print LLM's message to console
+        print(f"Bot: {bot_response}")
         await update.message.reply_text(bot_response)
 
     except Exception as e:
