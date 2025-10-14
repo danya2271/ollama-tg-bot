@@ -40,13 +40,14 @@ async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles incoming chat messages and gets a response from the Ollama model."""
     user_id = update.effective_user.id
-    if user_id not in ALLOWED_TELEGRAM_USER_IDS:
-        await update.message.reply_text("Sorry, you are not authorized to use this bot.")
-        return
 
     user_message = update.message.text
     # Print user's message to console
     print(f"User ({update.effective_user.first_name}): {user_message}")
+
+    if user_id not in ALLOWED_TELEGRAM_USER_IDS:
+        await update.message.reply_text("Sorry, you are not authorized to use this bot.")
+        return
 
     # Show a "typing..." notification to the user
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
