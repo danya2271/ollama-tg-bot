@@ -2,7 +2,7 @@ import asyncio
 import ollama
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
-from ddgs import DDGS
+from duckduckgo_search import DDGS
 
 # --- Import Configuration ---
 from config import TELEGRAM_BOT_TOKEN, OLLAMA_MODEL, ALLOWED_TELEGRAM_USER_IDS
@@ -23,7 +23,7 @@ COMMANDS_INFO = """
 
 /help - Показать это сообщение с описанием команд.
 
-Вы также можете просто общаться со мной, отправляя сообщения без команд.
+Вы также можете просто общаться со мной, отправляя сообщения без команд, или отправить мне фотографию (с подписью или без).
 """
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -146,6 +146,45 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         print(f"An error occurred: {e}")
         await update.message.reply_text("Извините, во время обработки вашего запроса произошла ошибка.")
 
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    target_model = OLLAMA_MODEL if user_id in ALLOWED_TELEGRAM_USER_IDS else OLLAMA_GUEST_MODEL
+
+    await update.message.reply_text("Получил фото, обрабатываю...")
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
+
+    try:
+        photo_file = await update.message.photo[-1].get_file()
+        photo_bytes = await photo_file.download_as_bytearray()
+
+        prompt = update.message.caption
+        if not prompt:
+            prompt = "Подробно опиши это изображение."
+
+        response = ollama.chat(
+            model=target_model,
+            messages=[
+                {
+                    'role': 'user',
+                    'content': prompt,
+                    'images': [photo_bytes]
+                }
+            ]
+        )
+        bot_response = response['message']['content']
+
+        if len(bot_response) > TELEGRAM_MAX_MESSAGE_LENGTH:
+            for i in range(0, len(bot_response), TELEGRAM_MAX_MESSAGE_LENGTH):
+                chunk = bot_response[i:i+TELEGRAM_MAX_MESSAGE_LENGTH]
+                await update.message.reply_text(chunk)
+        else:
+            await update.message.reply_text(bot_response)
+
+    except Exception as e:
+        print(f"An error occurred while handling photo: {e}")
+        await update.message.reply_text("Извините, произошла ошибка при обработке фото. Убедитесь, что для OLLAMA_MODEL установлена мультимодальная модель (например, llava).")
+
+
 def main() -> None:
     """Starts the Telegram bot."""
     print("Starting bot...")
@@ -160,6 +199,7 @@ def main() -> None:
     app.add_handler(CommandHandler("restart", restart))
     app.add_handler(CommandHandler("ask", ask))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
     # --- Start the Bot ---
     print("Bot is running. Press Ctrl+C to stop.")
