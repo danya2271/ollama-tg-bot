@@ -9,6 +9,8 @@ from guest_config import OLLAMA_GUEST_MODEL
 
 # --- Bot Handlers ---
 
+TELEGRAM_MAX_MESSAGE_LENGTH = 4096
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_name = update.effective_user.first_name
     user_id = update.effective_user.id
@@ -69,9 +71,19 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             ]
         )
         bot_response = response['message']['content']
-        # Print LLM's message to console
         print(f"Bot ({target_model}): {bot_response}")
-        await update.message.reply_text(bot_response)
+
+        # --- NEW: LOGIC TO HANDLE LONG MESSAGES ---
+        if len(bot_response) > TELEGRAM_MAX_MESSAGE_LENGTH:
+            # If the message is too long, split it into chunks
+            print("Response is too long, splitting into multiple messages.")
+            for i in range(0, len(bot_response), TELEGRAM_MAX_MESSAGE_LENGTH):
+                chunk = bot_response[i:i + TELEGRAM_MAX_MESSAGE_LENGTH]
+                # Send each chunk as a separate message
+                await update.message.reply_text(chunk)
+        else:
+            # If the message is within the limit, send it as a single message
+            await update.message.reply_text(bot_response)
 
     except Exception as e:
         print(f"An error occurred: {e}")
