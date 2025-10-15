@@ -11,6 +11,7 @@ from guest_config import OLLAMA_GUEST_MODEL
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_name = update.effective_user.first_name
+    user_id = update.effective_user.id
     """Sends a welcome message when the /start command is issued."""
     if user_id not in ALLOWED_TELEGRAM_USER_IDS:
         await update.message.reply_text(f"Hello, {user_name}! I am a bot powered by the {OLLAMA_GUEST_MODEL} model. How can I help you today?")
