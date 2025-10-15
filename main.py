@@ -5,29 +5,32 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, fil
 
 # --- Import Configuration ---
 from config import TELEGRAM_BOT_TOKEN, OLLAMA_MODEL, ALLOWED_TELEGRAM_USER_IDS
+from guest_config import OLLAMA_GUEST_MODEL
 
 # --- Bot Handlers ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_name = update.effective_user.first_name
     """Sends a welcome message when the /start command is issued."""
-    await update.message.reply_text(f"Hello, {user_name}! I am a bot powered by the {OLLAMA_MODEL} model. How can I help you today?")
+    if user_id not in ALLOWED_TELEGRAM_USER_IDS:
+        await update.message.reply_text(f"Hello, {user_name}! I am a bot powered by the {OLLAMA_GUEST_MODEL} model. How can I help you today?")
+    else:
+        await update.message.reply_text(f"Hello, {user_name}! I am a bot powered by the {OLLAMA_MODEL} model. How can I help you today?")
 
 async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sends a '/clear' command to Ollama to reset the conversation context."""
     user_id = update.effective_user.id
-    if user_id not in ALLOWED_TELEGRAM_USER_IDS:
-        await update.message.reply_text("Sorry, you are not authorized to use this bot.")
-        return
-
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
+
+    model_to_reset = OLLAMA_MODEL if user_id in ALLOWED_TELEGRAM_USER_IDS else OLLAMA_GUEST_MODEL
+
     await update.message.reply_text("Resetting the model session...")
 
     try:
         # Send the /clear command to the model to formally end the conversation.
         # We don't need to do anything with the response.
         ollama.chat(
-            model=OLLAMA_MODEL,
+            model=model_to_reset,
             messages=[{'role': 'user', 'content': '/clear'}]
         )
         await update.message.reply_text("Model session has been successfully reset. I'm ready for a new conversation!")
@@ -45,9 +48,10 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Print user's message to console
     print(f"User ({update.effective_user.first_name}): {user_message}")
 
-    if user_id not in ALLOWED_TELEGRAM_USER_IDS:
-        await update.message.reply_text("Sorry, you are not authorized to use this bot.")
-        return
+    if user_id in ALLOWED_TELEGRAM_USER_IDS:
+        target_model = OLLAMA_MODEL
+    else:
+        target_model = OLLAMA_GUEST_MODEL
 
     # Show a "typing..." notification to the user
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
@@ -55,7 +59,7 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         # Get the response from the Ollama model
         response = ollama.chat(
-            model=OLLAMA_MODEL,
+            model=target_model,
             messages=[
                 {
                     'role': 'user',
@@ -65,7 +69,7 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         bot_response = response['message']['content']
         # Print LLM's message to console
-        print(f"Bot: {bot_response}")
+        print(f"Bot ({target_model}): {bot_response}")
         await update.message.reply_text(bot_response)
 
     except Exception as e:
@@ -75,6 +79,8 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 def main() -> None:
     """Starts the Telegram bot."""
     print("Starting bot...")
+    print(f"Authorized users will use: {OLLAMA_MODEL}")
+    print(f"Guest users will use: {OLLAMA_GUEST_MODEL}")
 
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
