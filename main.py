@@ -77,7 +77,7 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"Ищу информацию по запросу: \"{query}\"...")
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
 
-        search_results = DDGS().text(query, max_results=5, region='ru-ru')
+        search_results = DDGS().text(query, max_results=12, region='ru-ru')
 
         search_context = ""
         if search_results:
