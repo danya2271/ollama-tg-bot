@@ -2,7 +2,7 @@ import asyncio
 import ollama
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 
 # --- Import Configuration ---
 from config import TELEGRAM_BOT_TOKEN, OLLAMA_MODEL, ALLOWED_TELEGRAM_USER_IDS
