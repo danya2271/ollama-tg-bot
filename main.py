@@ -94,7 +94,11 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
         system_prompt = "Ты — ассистент, который отвечает на вопросы пользователя, основываясь ИСКЛЮЧИТЕЛЬНО на предоставленной ниже информации из интернета. Не используй свои внутренние знания. Сформируй связный и исчерпывающий ответ. Если предоставленная информация не позволяет ответить на вопрос, сообщи об этом."
         user_prompt = f"Контекст из поиска в интернете:\n---\n{search_context}\n---\nВопрос пользователя: {query}"
-        response = ollama.chat(model=target_model, messages=[{'role': 'system', 'content': system_prompt}, {'role': 'user', 'content': user_prompt}])
+        response = ollama.chat(
+            model=target_model, 
+            messages=[{'role': 'system', 'content': system_prompt}, {'role': 'user', 'content': user_prompt}],
+            options={'keep_alive': -1}
+        )
         bot_response = response['message']['content']
         await update.message.reply_text(bot_response)
     except Exception as e:
@@ -115,16 +119,13 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     history = context.chat_data.get('history', [])
     use_google_search = context.user_data.get('use_google', False)
     
-    # Копируем историю для отправки в модель
     messages_to_send = list(history)
 
     try:
         search_queries = []
         if use_google_search:
-            # --- ЭТАП 1: ГЕНЕРАЦИЯ ПОИСКОВЫХ ЗАПРОСОВ ---
             await update.message.reply_text("Анализирую запрос...")
             
-            # Промпт, который заставляет модель думать, нужно ли искать, и что именно
             query_generation_prompt = f"""
 Проанализируй последний запрос пользователя в контексте нашей предыдущей переписки. 
 Твоя задача - определить, нужно ли для ответа искать свежую информацию в интернете.
@@ -143,21 +144,19 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             response = ollama.chat(
                 model=target_model,
                 messages=[{'role': 'user', 'content': query_generation_prompt}],
-                options={'temperature': 0.0} # Низкая температура для точности
+                options={'temperature': 0.0, 'keep_alive': -1} # <--- ДОБАВЛЕНО ЗДЕСЬ
             )
             
             try:
-                # Пытаемся распарсить ответ модели как JSON
                 queries_str = response['message']['content']
                 search_queries = json.loads(queries_str)
                 if not isinstance(search_queries, list):
-                     search_queries = [] # Если это не список, считаем, что запросов нет
+                     search_queries = []
             except (json.JSONDecodeError, TypeError):
                 print(f"Warning: Could not parse search queries from model response: {queries_str}")
                 search_queries = []
 
         if search_queries:
-            # --- ЭТАП 2: ВЫПОЛНЕНИЕ ПОИСКА И СИНТЕЗ ОТВЕТА ---
             await update.message.reply_text(f"Ищу информацию по запросам: {', '.join(f'"{q}"' for q in search_queries)}")
             await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
             
@@ -175,26 +174,24 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     f"--- Контекст из поиска ---\n{search_context}\n"
                     f"--- Конец контекста ---\n\n"
                 )
-                # Добавляем системное сообщение с контекстом перед последним сообщением пользователя
                 messages_to_send.append({'role': 'system', 'content': prompt_with_context})
 
-        # --- ОБЩАЯ ЛОГИКА: ГЕНЕРАЦИЯ ФИНАЛЬНОГО ОТВЕТА ---
         messages_to_send.append({'role': 'user', 'content': user_message})
         
-        final_response = ollama.chat(model=target_model, messages=messages_to_send)
+        final_response = ollama.chat(
+            model=target_model, 
+            messages=messages_to_send,
+            options={'keep_alive': -1} # <--- И ЗДЕСЬ
+        )
         bot_response_content = final_response['message']['content']
         print(f"Bot ({target_model}): {bot_response_content}")
 
-        # Обновляем историю оригинальным сообщением пользователя и ответом бота
+        # ... (остальной код функции без изменений)
         history.append({'role': 'user', 'content': user_message})
         history.append({'role': 'assistant', 'content': bot_response_content})
-
         if len(history) > MAX_HISTORY_LENGTH:
             history = history[-MAX_HISTORY_LENGTH:]
-        
         context.chat_data['history'] = history
-
-        # Отправка ответа пользователю
         if len(bot_response_content) > TELEGRAM_MAX_MESSAGE_LENGTH:
             for i in range(0, len(bot_response_content), TELEGRAM_MAX_MESSAGE_LENGTH):
                 await update.message.reply_text(bot_response_content[i:i + TELEGRAM_MAX_MESSAGE_LENGTH])
@@ -207,7 +204,55 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # ... (код функции без изменений)
+    user_id = update.effective_user.id
+    target_model = OLLAMA_MODEL if user_id in ALLOWED_TELEGRAM_USER_IDS else OLLAMA_GUEST_MODEL
+
+    if "llava" not in target_model:
+        await update.message.reply_text("Извините, текущая модель не поддерживает обработку изображений.")
+        return
+
+    await update.message.reply_text("Получил фото, обрабатываю...")
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
+
+    try:
+        photo_file = await update.message.photo[-1].get_file()
+        photo_bytes = await photo_file.download_as_bytearray()
+
+        prompt = update.message.caption or "Подробно опиши это изображение."
+        
+        history = context.chat_data.get('history', [])
+        
+        current_user_message = {
+            'role': 'user',
+            'content': prompt,
+            'images': [photo_bytes]
+        }
+
+        response = ollama.chat(
+            model=target_model,
+            messages=history + [current_user_message]
+            options={'keep_alive': -1} 
+        )
+        bot_response_content = response['message']['content']
+
+        history.append({'role': 'user', 'content': prompt})
+        history.append({'role': 'assistant', 'content': bot_response_content})
+
+        if len(history) > MAX_HISTORY_LENGTH:
+            history = history[-MAX_HISTORY_LENGTH:]
+            
+        context.chat_data['history'] = history
+
+        if len(bot_response_content) > TELEGRAM_MAX_MESSAGE_LENGTH:
+            for i in range(0, len(bot_response_content), TELEGRAM_MAX_MESSAGE_LENGTH):
+                chunk = bot_response_content[i:i+TELEGRAM_MAX_MESSAGE_LENGTH]
+                await update.message.reply_text(chunk)
+        else:
+            await update.message.reply_text(bot_response_content)
+
+    except Exception as e:
+        print(f"An error occurred while handling photo: {e}")
+        await update.message.reply_text("Извините, произошла ошибка при обработке фото.")
     pass
 
 
