@@ -128,7 +128,7 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     try:
         if use_google_search:
-            await update.message.reply_text("Ищу актуальную информацию...", quote=True)
+            await update.message.reply_text("Ищу актуальную информацию...")
             await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
             
             search_results = DDGS().text(user_message, max_results=18, region='ru-ru')
