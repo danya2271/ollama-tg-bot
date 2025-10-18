@@ -11,6 +11,8 @@ from guest_config import OLLAMA_GUEST_MODEL
 # --- Bot Handlers ---
 
 TELEGRAM_MAX_MESSAGE_LENGTH = 4096
+# Ограничение на количество сообщений в истории для экономии памяти и токенов
+MAX_HISTORY_LENGTH = 20 # 10 пар "вопрос-ответ"
 
 # --- Текст с описанием команд для переиспользования ---
 COMMANDS_INFO = """
@@ -19,7 +21,7 @@ COMMANDS_INFO = """
 /ask [ваш вопрос] - Найти информацию в интернете и ответить на основе найденных данных.
 Пример: `/ask последние новости о космосе`
 
-/restart - Сбросить контекст текущего диалога.
+/restart - Сбросить контекст текущего диалога (начать беседу заново).
 
 /help - Показать это сообщение с описанием команд.
 
@@ -37,6 +39,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"Здравствуйте, {user_name}! Я бот, работающий на модели {model_in_use}.\n\n"
         f"{COMMANDS_INFO}"
     )
+    # Очищаем историю при старте, чтобы начать новый диалог
+    if 'history' in context.chat_data:
+        del context.chat_data['history']
+        
     await update.message.reply_text(welcome_message)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -44,25 +50,17 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text(COMMANDS_INFO)
 
 async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Sends a '/clear' command to Ollama to reset the conversation context."""
-    user_id = update.effective_user.id
+    """Clears the conversation history for the current chat."""
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
+    
+    # Главное - очистить историю в состоянии бота
+    if 'history' in context.chat_data:
+        del context.chat_data['history']
+        await update.message.reply_text("Контекст диалога сброшен. Я готов к новой беседе!")
+    else:
+        await update.message.reply_text("История уже пуста. Просто напишите мне что-нибудь.")
 
-    model_to_reset = OLLAMA_MODEL if user_id in ALLOWED_TELEGRAM_USER_IDS else OLLAMA_GUEST_MODEL
-
-    await update.message.reply_text("Сбрасываю сессию модели...")
-
-    try:
-        ollama.chat(
-            model=model_to_reset,
-            messages=[{'role': 'user', 'content': '/clear'}]
-        )
-        await update.message.reply_text("Сессия модели была успешно сброшена. Я готов к новой беседе!")
-
-    except Exception as e:
-        print(f"An error occurred during restart: {e}")
-        await update.message.reply_text("Извините, при попытке сбросить модель произошла ошибка.")
-
+# Функция ask остается без изменений, т.к. она не должна быть частью общего диалога
 async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     query = ' '.join(context.args)
@@ -113,42 +111,65 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         print(f"An error occurred in the ask function: {e}")
         await update.message.reply_text("Извините, во время обработки вашего запроса произошла ошибка.")
 
+
 async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles incoming chat messages and gets a response from the Ollama model."""
+    """Handles incoming chat messages, maintains conversation history, and gets a response from the Ollama model."""
     user_id = update.effective_user.id
     user_message = update.message.text
-    # Print user's message to console
     print(f"User ({update.effective_user.first_name}): {user_message}")
 
     target_model = OLLAMA_MODEL if user_id in ALLOWED_TELEGRAM_USER_IDS else OLLAMA_GUEST_MODEL
-
-    # Show a "typing..." notification to the user
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
 
+    # 1. Получаем историю или создаем новую
+    history = context.chat_data.get('history', [])
+    
+    # 2. Добавляем новое сообщение пользователя
+    history.append({'role': 'user', 'content': user_message})
+
     try:
-        # Get the response from the Ollama model
+        # 3. Отправляем всю историю в модель
         response = ollama.chat(
             model=target_model,
-            messages=[{'role': 'user', 'content': user_message}]
+            messages=history
         )
-        bot_response = response['message']['content']
-        print(f"Bot ({target_model}): {bot_response}")
+        bot_response_content = response['message']['content']
+        print(f"Bot ({target_model}): {bot_response_content}")
 
-        if len(bot_response) > TELEGRAM_MAX_MESSAGE_LENGTH:
-            print("Response is too long, splitting into multiple messages.")
-            for i in range(0, len(bot_response), TELEGRAM_MAX_MESSAGE_LENGTH):
-                chunk = bot_response[i:i + TELEGRAM_MAX_MESSAGE_LENGTH]
+        # 4. Добавляем ответ бота в историю
+        history.append({'role': 'assistant', 'content': bot_response_content})
+
+        # Обрезаем историю, чтобы она не стала слишком длинной
+        if len(history) > MAX_HISTORY_LENGTH:
+            history = history[-MAX_HISTORY_LENGTH:]
+
+        # 5. Сохраняем обновленную историю
+        context.chat_data['history'] = history
+        
+        # Отправка ответа пользователю
+        if len(bot_response_content) > TELEGRAM_MAX_MESSAGE_LENGTH:
+            for i in range(0, len(bot_response_content), TELEGRAM_MAX_MESSAGE_LENGTH):
+                chunk = bot_response_content[i:i + TELEGRAM_MAX_MESSAGE_LENGTH]
                 await update.message.reply_text(chunk)
         else:
-            await update.message.reply_text(bot_response)
+            await update.message.reply_text(bot_response_content)
 
     except Exception as e:
         print(f"An error occurred: {e}")
+        # В случае ошибки удаляем последнее сообщение пользователя из истории, чтобы не засорять контекст
+        history.pop()
+        context.chat_data['history'] = history
         await update.message.reply_text("Извините, во время обработки вашего запроса произошла ошибка.")
+
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     target_model = OLLAMA_MODEL if user_id in ALLOWED_TELEGRAM_USER_IDS else OLLAMA_GUEST_MODEL
+
+    # Проверяем, поддерживает ли модель обработку изображений
+    if "llava" not in target_model:
+        await update.message.reply_text("Извините, текущая модель не поддерживает обработку изображений.")
+        return
 
     await update.message.reply_text("Получил фото, обрабатываю...")
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
@@ -157,32 +178,47 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         photo_file = await update.message.photo[-1].get_file()
         photo_bytes = await photo_file.download_as_bytearray()
 
-        prompt = update.message.caption
-        if not prompt:
-            prompt = "Подробно опиши это изображение."
+        prompt = update.message.caption or "Подробно опиши это изображение."
+        
+        # 1. Получаем историю
+        history = context.chat_data.get('history', [])
+        
+        # 2. Создаем текущее сообщение пользователя с изображением
+        current_user_message = {
+            'role': 'user',
+            'content': prompt,
+            'images': [photo_bytes]
+        }
 
+        # 3. Отправляем историю + текущее сообщение с картинкой
         response = ollama.chat(
             model=target_model,
-            messages=[
-                {
-                    'role': 'user',
-                    'content': prompt,
-                    'images': [photo_bytes]
-                }
-            ]
+            messages=history + [current_user_message]
         )
-        bot_response = response['message']['content']
+        bot_response_content = response['message']['content']
 
-        if len(bot_response) > TELEGRAM_MAX_MESSAGE_LENGTH:
-            for i in range(0, len(bot_response), TELEGRAM_MAX_MESSAGE_LENGTH):
-                chunk = bot_response[i:i+TELEGRAM_MAX_MESSAGE_LENGTH]
+        # 4. Добавляем в историю текстовые части диалога (без картинки, чтобы не отправлять ее каждый раз)
+        history.append({'role': 'user', 'content': prompt})
+        history.append({'role': 'assistant', 'content': bot_response_content})
+
+        # Обрезаем историю
+        if len(history) > MAX_HISTORY_LENGTH:
+            history = history[-MAX_HISTORY_LENGTH:]
+            
+        # 5. Сохраняем историю
+        context.chat_data['history'] = history
+
+        # Отправка ответа
+        if len(bot_response_content) > TELEGRAM_MAX_MESSAGE_LENGTH:
+            for i in range(0, len(bot_response_content), TELEGRAM_MAX_MESSAGE_LENGTH):
+                chunk = bot_response_content[i:i+TELEGRAM_MAX_MESSAGE_LENGTH]
                 await update.message.reply_text(chunk)
         else:
-            await update.message.reply_text(bot_response)
+            await update.message.reply_text(bot_response_content)
 
     except Exception as e:
         print(f"An error occurred while handling photo: {e}")
-        await update.message.reply_text("Извините, произошла ошибка при обработке фото. Убедитесь, что для OLLAMA_MODEL установлена мультимодальная модель (например, llava).")
+        await update.message.reply_text("Извините, произошла ошибка при обработке фото.")
 
 
 def main() -> None:
