@@ -230,7 +230,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
         response = ollama.chat(
             model=target_model,
-            messages=history + [current_user_message]
+            messages=history + [current_user_message],
             options={'keep_alive': -1} 
         )
         bot_response_content = response['message']['content']
