@@ -207,10 +207,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     user_id = update.effective_user.id
     target_model = OLLAMA_MODEL if user_id in ALLOWED_TELEGRAM_USER_IDS else OLLAMA_GUEST_MODEL
 
-    if "llava" not in target_model:
-        await update.message.reply_text("Извините, текущая модель не поддерживает обработку изображений.")
-        return
-
     await update.message.reply_text("Получил фото, обрабатываю...")
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
 
